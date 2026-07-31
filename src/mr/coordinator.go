@@ -3,6 +3,7 @@ package mr
 import (
 	"fmt"
 	"log"
+	"sync"
 	"time"
 )
 import "net"
@@ -41,36 +42,30 @@ type Job struct {
 }
 
 type WorkerType struct {
-	workerId string
-	status   WorkerStatus
-	Address  string
-	Port     int
-	LastSeen time.Time
+	workerId        string
+	status          WorkerStatus
+	Address         string
+	Port            int
+	LastSeen        time.Time
+	HeartBeatChecks int
 }
 
 type Coordinator struct {
+	mu         sync.Mutex
 	isTaskDone bool         //indicates if all tasks are done
 	workers    []WorkerType //to keep track of workers which are idle , active or crashed
 	jobs       []Job        //will contain all running / scheduled tasks
 }
 
 // Your code here -- RPC handlers for the worker to call.
-
-// an example RPC handler.
-//
-// the RPC argument and reply types are defined in rpc.go.
-func (c *Coordinator) Example(args *ExampleArgs, reply *ExampleReply) error {
-	reply.Y = args.X + 1
-	return nil
-}
-
 func (c *Coordinator) RegisterWorker(args *WorkerRegistrationArgs, reply *WorkerRegistrationReply) error {
 	worker := WorkerType{
-		workerId: args.WorkerID,
-		status:   StateConnected,
-		Address:  args.RpcAddr,
-		Port:     args.Port,
-		LastSeen: time.Now(),
+		workerId:        args.WorkerID,
+		status:          StateConnected,
+		Address:         args.RpcAddr,
+		Port:            args.Port,
+		LastSeen:        time.Now(),
+		HeartBeatChecks: 0,
 	}
 
 	c.workers = append(c.workers, worker)
@@ -93,19 +88,110 @@ func (c *Coordinator) server() {
 	}
 
 	fmt.Println("Coordinator listening on port 3000")
+	go func() {
+		for {
+			conn, err := l.Accept()
+			if err != nil {
+				return
+			}
+			go rpc.ServeConn(conn)
+		}
+	}()
 
-	//for c.Done() != true {
-	//	time.Sleep(time.Second)
-	//	fmt.Println(c.workers, "workers ", " ---  ", len(c.workers))
-	//}
-	rpc.Accept(l)
+	go c.Healthcheck()
+
 }
 
-// main/mrcoordinator.go calls Done() periodically to find out
-// if the entire job has finished.
+func (c *Coordinator) Healthcheck() {
+
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for range ticker.C {
+
+		if c.Done() {
+			fmt.Println("All tasks are done")
+			return
+		}
+
+		c.mu.Lock()
+
+		workers := make([]WorkerType, len(c.workers))
+		copy(workers, c.workers)
+		c.mu.Unlock()
+
+		for idx, worker := range workers {
+			go c.WorkerSync("Workers.Ping", worker.workerId, worker.Port, idx)
+		}
+	}
+}
+
 func (c *Coordinator) Done() bool {
 
 	return c.isTaskDone
+}
+
+func (c *Coordinator) ActiveWorkers() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	count := 0
+	for _, worker := range c.workers {
+		if worker.status == StateConnected {
+			count++
+		}
+	}
+
+	return count
+}
+
+func (c *Coordinator) WorkerSync(rpcname string, workerId string, port int, workerIdx int) {
+
+	workerAddress := fmt.Sprintf("localhost:%d", port)
+	client, err := rpc.Dial("tcp", workerAddress)
+	if err != nil {
+		c.workers[workerIdx].status = StateRetrying
+		return
+	}
+	defer client.Close()
+
+	var result PingReply
+	args := PingArgs{
+		WorkerId: workerId,
+	}
+
+	err = client.Call(rpcname, args, &result)
+	c.mu.Lock()
+	if err != nil {
+		fmt.Println("Ping error ", err)
+		if c.workers[workerIdx].HeartBeatChecks == 3 {
+
+			c.workers[workerIdx].status = StatusError
+		} else {
+
+			c.workers[workerIdx].HeartBeatChecks += 1
+			c.workers[workerIdx].LastSeen = time.Now()
+			c.workers[workerIdx].status = StateRetrying
+		}
+	} else {
+
+		fmt.Println("Worker Sync Result :: ", result.PingStatus)
+
+		//intentional failure here - for simulating worker failures
+		if c.workers[workerIdx].HeartBeatChecks == 5 && c.workers[workerIdx].status == StateConnected {
+
+			c.workers[workerIdx].status = StatusError
+			c.workers[workerIdx].HeartBeatChecks = 0
+			fmt.Println("Worker is not responding for 5 consecutive checks")
+			return
+		}
+
+		c.workers[workerIdx].HeartBeatChecks += 1
+		c.workers[workerIdx].LastSeen = time.Now()
+		c.workers[workerIdx].status = StateConnected
+	}
+
+	defer c.mu.Unlock()
+
 }
 
 // create a Coordinator.

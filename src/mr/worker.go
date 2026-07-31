@@ -79,11 +79,11 @@ func call(rpcname string, args interface{}, reply interface{}) bool {
 	return false
 }
 
-func WorkerRegistrationRequest(addr *net.TCPAddr) {
+func WorkerRegistrationRequest(workerId string, addr *net.TCPAddr) {
 
 	var result WorkerRegistrationReply
 	args := WorkerRegistrationArgs{
-		WorkerID: "worker1",
+		WorkerID: workerId,
 		RpcAddr:  addr.IP.String(),
 		Port:     addr.Port,
 	}

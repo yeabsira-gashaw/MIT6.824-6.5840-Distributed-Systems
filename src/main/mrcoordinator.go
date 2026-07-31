@@ -9,8 +9,11 @@ package main
 // Please do not change this file.
 //
 
-import "6.5840/mr"
-import "time"
+import (
+	"time"
+
+	"6.5840/mr"
+)
 import "os"
 import "fmt"
 
@@ -22,8 +25,8 @@ func main() {
 
 	m := mr.MakeCoordinator(os.Args[1:], 10)
 	for m.Done() == false {
-		fmt.Printf("still alive\n")
-		time.Sleep(time.Second)
+		fmt.Printf("still alive :: %d", m.ActiveWorkers())
+		time.Sleep(10 * time.Second)
 	}
 
 	fmt.Println("All jobs finished.")

@@ -9,10 +9,13 @@ package mr
 import "os"
 import "strconv"
 
-//
-// example to show how to declare the arguments
-// and reply for an RPC.
-//
+// PingArgs - Coordinator to Worker ping check
+type PingArgs struct {
+	WorkerId string
+}
+type PingReply struct {
+	PingStatus bool
+}
 
 type WorkerRegistrationArgs struct {
 	WorkerID string

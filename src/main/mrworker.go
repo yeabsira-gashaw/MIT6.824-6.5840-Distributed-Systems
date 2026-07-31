@@ -14,6 +14,7 @@ import (
 	"net"
 	"net/rpc"
 	"plugin"
+	"time"
 
 	"6.5840/mr"
 )
@@ -27,20 +28,9 @@ type Workers struct {
 	Port    string
 }
 
-type Args struct {
-}
+func (w *Workers) Ping(args *mr.PingArgs, reply *mr.PingReply) error {
 
-type PingRequest struct{}
-
-type PingResponse struct {
-	WorkerID string
-	Status   string
-}
-
-func (w *Workers) Ping(req PingRequest, resp *PingResponse) error {
-
-	resp.WorkerID = w.ID
-	resp.Status = "alive"
+	reply.PingStatus = args.WorkerId == w.ID
 	return nil
 }
 
@@ -66,17 +56,18 @@ func main() {
 	addr := listener.Addr().(*net.TCPAddr)
 	fmt.Printf("Worker listening on %s:%d\n", addr.IP, addr.Port)
 
+	worker.ID = fmt.Sprintf("worker-%d", time.Now().UnixMicro())
 	worker.RPCAddr = addr.IP.String()
 	worker.Port = fmt.Sprintf("%d", addr.Port)
 
-	fmt.Printf("Registering with coordinator...")
-	mr.WorkerRegistrationRequest(addr)
+	go mr.WorkerRegistrationRequest(worker.ID, addr)
+
+	rpc.Accept(listener) //allow incoming requests
 
 	//mapf, reducef := loadPlugin(os.Args[1])
 
 	//mr.Worker(mapf, reducef)
 
-	rpc.Accept(listener) //allow incoming requests
 }
 
 // load the application Map and Reduce functions
