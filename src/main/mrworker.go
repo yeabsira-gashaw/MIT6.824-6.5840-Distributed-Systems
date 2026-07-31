@@ -10,11 +10,39 @@ package main
 // Please do not change this file.
 //
 
-import "6.5840/mr"
-import "plugin"
+import (
+	"net"
+	"net/rpc"
+	"plugin"
+
+	"6.5840/mr"
+)
 import "os"
 import "fmt"
 import "log"
+
+type Workers struct {
+	ID      string
+	RPCAddr string
+	Port    string
+}
+
+type Args struct {
+}
+
+type PingRequest struct{}
+
+type PingResponse struct {
+	WorkerID string
+	Status   string
+}
+
+func (w *Workers) Ping(req PingRequest, resp *PingResponse) error {
+
+	resp.WorkerID = w.ID
+	resp.Status = "alive"
+	return nil
+}
 
 func main() {
 	if len(os.Args) != 2 {
@@ -22,9 +50,33 @@ func main() {
 		os.Exit(1)
 	}
 
-	mapf, reducef := loadPlugin(os.Args[1])
+	worker := new(Workers)
+	err := rpc.Register(worker)
+	if err != nil {
+		log.Fatal("RPC register error:", err)
+	}
 
-	mr.Worker(mapf, reducef)
+	listener, err := net.Listen("tcp", ":0")
+	if err != nil {
+		log.Fatal("listen error:", err)
+	}
+
+	defer listener.Close()
+
+	addr := listener.Addr().(*net.TCPAddr)
+	fmt.Printf("Worker listening on %s:%d\n", addr.IP, addr.Port)
+
+	worker.RPCAddr = addr.IP.String()
+	worker.Port = fmt.Sprintf("%d", addr.Port)
+
+	fmt.Printf("Registering with coordinator...")
+	mr.WorkerRegistrationRequest(addr)
+
+	//mapf, reducef := loadPlugin(os.Args[1])
+
+	//mr.Worker(mapf, reducef)
+
+	rpc.Accept(listener) //allow incoming requests
 }
 
 // load the application Map and Reduce functions

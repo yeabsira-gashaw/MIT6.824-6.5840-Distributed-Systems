@@ -1,33 +1,28 @@
 package mr
 
-import "fmt"
+import (
+	"fmt"
+	"net"
+)
 import "log"
 import "net/rpc"
 import "hash/fnv"
 
-
-//
 // Map functions return a slice of KeyValue.
-//
 type KeyValue struct {
 	Key   string
 	Value string
 }
 
-//
 // use ihash(key) % NReduce to choose the reduce
 // task number for each KeyValue emitted by Map.
-//
 func ihash(key string) int {
 	h := fnv.New32a()
 	h.Write([]byte(key))
 	return int(h.Sum32() & 0x7fffffff)
 }
 
-
-//
 // main/mrworker.go calls this function.
-//
 func Worker(mapf func(string, string) []KeyValue,
 	reducef func(string, []string) string) {
 
@@ -38,11 +33,9 @@ func Worker(mapf func(string, string) []KeyValue,
 
 }
 
-//
 // example function to show how to make an RPC call to the coordinator.
 //
 // the RPC argument and reply types are defined in rpc.go.
-//
 func CallExample() {
 
 	// declare an argument structure.
@@ -67,15 +60,11 @@ func CallExample() {
 	}
 }
 
-//
 // send an RPC request to the coordinator, wait for the response.
 // usually returns true.
 // returns false if something goes wrong.
-//
 func call(rpcname string, args interface{}, reply interface{}) bool {
-	// c, err := rpc.DialHTTP("tcp", "127.0.0.1"+":1234")
-	sockname := coordinatorSock()
-	c, err := rpc.DialHTTP("unix", sockname)
+	c, err := rpc.Dial("tcp", "localhost:3000")
 	if err != nil {
 		log.Fatal("dialing:", err)
 	}
@@ -88,4 +77,21 @@ func call(rpcname string, args interface{}, reply interface{}) bool {
 
 	fmt.Println(err)
 	return false
+}
+
+func WorkerRegistrationRequest(addr *net.TCPAddr) {
+
+	var result WorkerRegistrationReply
+	args := WorkerRegistrationArgs{
+		WorkerID: "worker1",
+		RpcAddr:  addr.IP.String(),
+		Port:     addr.Port,
+	}
+
+	ok := call("Coordinator.RegisterWorker", &args, &result)
+	if ok {
+		fmt.Printf("reply  %v\n", result)
+	} else {
+		fmt.Printf("call failed!\n")
+	}
 }

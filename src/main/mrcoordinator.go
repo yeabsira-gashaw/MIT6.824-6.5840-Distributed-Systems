@@ -22,8 +22,9 @@ func main() {
 
 	m := mr.MakeCoordinator(os.Args[1:], 10)
 	for m.Done() == false {
+		fmt.Printf("still alive\n")
 		time.Sleep(time.Second)
 	}
 
-	time.Sleep(time.Second)
+	fmt.Println("All jobs finished.")
 }
