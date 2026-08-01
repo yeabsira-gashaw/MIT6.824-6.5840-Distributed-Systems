@@ -2,12 +2,22 @@ package mr
 
 import (
 	"fmt"
+	"io/ioutil"
 	"net"
+	"os"
+	"plugin"
 	"time"
 )
 import "log"
 import "net/rpc"
 import "hash/fnv"
+
+type ByKey []KeyValue
+
+// for sorting by key.
+func (a ByKey) Len() int           { return len(a) }
+func (a ByKey) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
+func (a ByKey) Less(i, j int) bool { return a[i].Key < a[j].Key }
 
 type Workers struct {
 	ID      string
@@ -15,13 +25,32 @@ type Workers struct {
 	Port    string
 }
 
+// load the application Map and Reduce functions
+// from a plugin file, e.g. ../mrapps/wc.so
+func loadPlugin(filename string) (func(string, string) []KeyValue, func(string, []string) string) {
+	p, err := plugin.Open(filename)
+	if err != nil {
+		log.Fatalf("cannot load plugin %v", filename)
+	}
+	xmapf, err := p.Lookup("Map")
+	if err != nil {
+		log.Fatalf("cannot find Map in %v", filename)
+	}
+	mapf := xmapf.(func(string, string) []KeyValue)
+	xreducef, err := p.Lookup("Reduce")
+	if err != nil {
+		log.Fatalf("cannot find Reduce in %v", filename)
+	}
+	reducef := xreducef.(func(string, []string) string)
+
+	return mapf, reducef
+}
+
 func (w *Workers) Ping(args *PingArgs, reply *PingReply) error {
 
 	reply.PingStatus = args.WorkerId == w.ID
 	return nil
 }
-
-//mapf, reducef := loadPlugin(os.Args[1])
 
 // Map functions return a slice of KeyValue.
 type KeyValue struct {
@@ -114,6 +143,8 @@ func WorkerRegistrationRequest(worker *Workers) {
 
 func WorkerFetchTasks(worker *Workers) {
 
+	mapf, _ := loadPlugin(os.Args[1])
+
 	var result WorkerTaskRequestReply
 	args := WorkerTaskRequestArgs{
 		WorkerID: worker.ID,
@@ -121,9 +152,26 @@ func WorkerFetchTasks(worker *Workers) {
 		Port:     worker.Port,
 	}
 
+	intermediate := ByKey{}
+
 	ok := call("Coordinator.TaskRequestByWorker", &args, &result)
 	if ok {
 		fmt.Printf("{ WorkerFetchTasks } : reply  %v\n", result)
+
+		file, err := os.Open(result.FilePath)
+		if err != nil {
+			log.Fatalf("cannot open %v", result.FilePath)
+		}
+		content, err := ioutil.ReadAll(file)
+		if err != nil {
+			log.Fatalf("cannot read %v", result.FilePath)
+		}
+		file.Close()
+		kva := mapf(result.FilePath, string(content))
+
+		intermediate = append(intermediate, kva...)
+
+		fmt.Printf("{ WorkerFetchTasks ---  } : intermediate %v\n", intermediate)
 	} else {
 		fmt.Printf("{ WorkerFetchTasks } : call failed!\n")
 	}

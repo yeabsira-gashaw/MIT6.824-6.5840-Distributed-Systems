@@ -256,7 +256,7 @@ func (c *Coordinator) WorkerSync(rpcname string, workerId string, port string, w
 
 	- Prepare a worker registration ✅
 	- Prepare healthcheck / ping mechanism from coordinator to workers ✅
-	-
+	- Worker fetches task from Coordinator ✅
 
 */
 
