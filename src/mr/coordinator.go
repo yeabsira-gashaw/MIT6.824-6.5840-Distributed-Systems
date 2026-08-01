@@ -9,13 +9,6 @@ import (
 import "net"
 import "net/rpc"
 
-type TaskType string
-
-const (
-	Map    TaskType = "MAP"
-	Reduce TaskType = "REDUCE"
-)
-
 type WorkerStatus string
 
 const (
@@ -34,30 +27,36 @@ const (
 )
 
 type Job struct {
-	taskId   string
-	filePath string
-	taskType TaskType
-	status   TaskStatus
-	worker   WorkerType
+	taskId     string
+	filePath   string
+	status     TaskStatus
+	worker     WorkerType
+	assignedAt time.Time
 }
 
 type WorkerType struct {
 	workerId        string
 	status          WorkerStatus
 	Address         string
-	Port            int
+	Port            string
 	LastSeen        time.Time
 	HeartBeatChecks int
 }
 
 type Coordinator struct {
+	noOfReduceTasks int
+
+	mapTasks    []Job
+	reduceTasks []Job
+
+	completedMap    int
+	completedReduce int
+
 	mu         sync.Mutex
 	isTaskDone bool         //indicates if all tasks are done
 	workers    []WorkerType //to keep track of workers which are idle , active or crashed
-	jobs       []Job        //will contain all running / scheduled tasks
 }
 
-// Your code here -- RPC handlers for the worker to call.
 func (c *Coordinator) RegisterWorker(args *WorkerRegistrationArgs, reply *WorkerRegistrationReply) error {
 	worker := WorkerType{
 		workerId:        args.WorkerID,
@@ -71,6 +70,59 @@ func (c *Coordinator) RegisterWorker(args *WorkerRegistrationArgs, reply *Worker
 	c.workers = append(c.workers, worker)
 
 	reply.RegistrationStatus = true
+	return nil
+}
+
+func (c *Coordinator) TaskRequestByWorker(args *WorkerTaskRequestArgs, reply *WorkerTaskRequestReply) error {
+
+	/*
+		This lock guarantees that while one worker is:
+
+		1. Looking for a waiting task,
+		2. Changing it to Pending,
+		3. Recording ownership,
+
+		- no other worker can enter this same section of code.
+
+	*/
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	var assignedWorker WorkerType
+	found := false
+
+	//check the worker if registered before
+	for _, worker := range c.workers {
+		if worker.workerId == args.WorkerID {
+			assignedWorker = worker
+			found = true
+			break
+		}
+	}
+
+	reply.TaskAvailable = false
+
+	if !found {
+		return nil
+	}
+
+	for i := range c.mapTasks {
+
+		task := &c.mapTasks[i]
+
+		if task.status == Waiting {
+
+			task.status = Pending
+			task.worker = assignedWorker
+
+			reply.TaskAvailable = true
+			reply.TaskId = task.taskId
+			reply.FilePath = task.filePath
+			reply.Status = task.status
+			return nil
+		}
+	}
+
 	return nil
 }
 
@@ -144,7 +196,7 @@ func (c *Coordinator) ActiveWorkers() int {
 	return count
 }
 
-func (c *Coordinator) WorkerSync(rpcname string, workerId string, port int, workerIdx int) {
+func (c *Coordinator) WorkerSync(rpcname string, workerId string, port string, workerIdx int) {
 
 	workerAddress := fmt.Sprintf("localhost:%d", port)
 	client, err := rpc.Dial("tcp", workerAddress)
@@ -177,13 +229,13 @@ func (c *Coordinator) WorkerSync(rpcname string, workerId string, port int, work
 		fmt.Println("Worker Sync Result :: ", result.PingStatus)
 
 		//intentional failure here - for simulating worker failures
-		if c.workers[workerIdx].HeartBeatChecks == 5 && c.workers[workerIdx].status == StateConnected {
-
-			c.workers[workerIdx].status = StatusError
-			c.workers[workerIdx].HeartBeatChecks = 0
-			fmt.Println("Worker is not responding for 5 consecutive checks")
-			return
-		}
+		//if c.workers[workerIdx].HeartBeatChecks == 5 && c.workers[workerIdx].status == StateConnected {
+		//
+		//	c.workers[workerIdx].status = StatusError
+		//	c.workers[workerIdx].HeartBeatChecks = 0
+		//	fmt.Println("Worker is not responding for 5 consecutive checks")
+		//	return
+		//}
 
 		c.workers[workerIdx].HeartBeatChecks += 1
 		c.workers[workerIdx].LastSeen = time.Now()
@@ -202,21 +254,27 @@ func (c *Coordinator) WorkerSync(rpcname string, workerId string, port int, work
 
 	ToDo
 
-	- Prepare a worker registration
-	- Prepare healthcheck / ping merchanism from coordinator to workers
+	- Prepare a worker registration ✅
+	- Prepare healthcheck / ping mechanism from coordinator to workers ✅
+	-
 
 */
 
 func MakeCoordinator(files []string, nReduce int) *Coordinator {
+
 	c := Coordinator{}
+	c.noOfReduceTasks = nReduce
 
-	//tasks := []Job{}
+	for idx, file := range files {
+		task := Job{
+			taskId:   fmt.Sprintf("task-%d", idx),
+			status:   Waiting,
+			filePath: file,
+		}
 
-	//for idx, file := range files {
-	//	task := Job{taskId: fmt.Sprintf("task-%s", idx), taskType: Map, status: Waiting}
-	//
-	//	append(tasks, task)
-	//}
-	c.server()
+		c.mapTasks = append(c.mapTasks, task)
+	}
+
+	go c.server()
 	return &c
 }

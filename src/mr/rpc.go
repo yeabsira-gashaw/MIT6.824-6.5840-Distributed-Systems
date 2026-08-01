@@ -20,10 +20,23 @@ type PingReply struct {
 type WorkerRegistrationArgs struct {
 	WorkerID string
 	RpcAddr  string
-	Port     int
+	Port     string
 }
 type WorkerRegistrationReply struct {
 	RegistrationStatus bool
+}
+
+type WorkerTaskRequestArgs struct {
+	WorkerID string
+	RpcAddr  string
+	Port     string
+}
+
+type WorkerTaskRequestReply struct {
+	TaskId        string
+	Status        TaskStatus
+	FilePath      string
+	TaskAvailable bool
 }
 
 type ExampleArgs struct {

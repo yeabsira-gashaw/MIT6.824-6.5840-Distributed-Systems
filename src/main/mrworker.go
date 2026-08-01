@@ -11,28 +11,12 @@ package main
 //
 
 import (
-	"net"
-	"net/rpc"
-	"plugin"
-	"time"
-
 	"6.5840/mr"
+	"plugin"
 )
 import "os"
 import "fmt"
 import "log"
-
-type Workers struct {
-	ID      string
-	RPCAddr string
-	Port    string
-}
-
-func (w *Workers) Ping(args *mr.PingArgs, reply *mr.PingReply) error {
-
-	reply.PingStatus = args.WorkerId == w.ID
-	return nil
-}
 
 func main() {
 	if len(os.Args) != 2 {
@@ -40,30 +24,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	worker := new(Workers)
-	err := rpc.Register(worker)
-	if err != nil {
-		log.Fatal("RPC register error:", err)
-	}
-
-	listener, err := net.Listen("tcp", ":0")
-	if err != nil {
-		log.Fatal("listen error:", err)
-	}
-
-	defer listener.Close()
-
-	addr := listener.Addr().(*net.TCPAddr)
-	fmt.Printf("Worker listening on %s:%d\n", addr.IP, addr.Port)
-
-	worker.ID = fmt.Sprintf("worker-%d", time.Now().UnixMicro())
-	worker.RPCAddr = addr.IP.String()
-	worker.Port = fmt.Sprintf("%d", addr.Port)
-
-	go mr.WorkerRegistrationRequest(worker.ID, addr)
-
-	rpc.Accept(listener) //allow incoming requests
-
+	mr.MakeWorker()
 	//mapf, reducef := loadPlugin(os.Args[1])
 
 	//mr.Worker(mapf, reducef)

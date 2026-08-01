@@ -3,10 +3,25 @@ package mr
 import (
 	"fmt"
 	"net"
+	"time"
 )
 import "log"
 import "net/rpc"
 import "hash/fnv"
+
+type Workers struct {
+	ID      string
+	RPCAddr string
+	Port    string
+}
+
+func (w *Workers) Ping(args *PingArgs, reply *PingReply) error {
+
+	reply.PingStatus = args.WorkerId == w.ID
+	return nil
+}
+
+//mapf, reducef := loadPlugin(os.Args[1])
 
 // Map functions return a slice of KeyValue.
 type KeyValue struct {
@@ -79,19 +94,64 @@ func call(rpcname string, args interface{}, reply interface{}) bool {
 	return false
 }
 
-func WorkerRegistrationRequest(workerId string, addr *net.TCPAddr) {
+func WorkerRegistrationRequest(worker *Workers) {
 
 	var result WorkerRegistrationReply
 	args := WorkerRegistrationArgs{
-		WorkerID: workerId,
-		RpcAddr:  addr.IP.String(),
-		Port:     addr.Port,
+		WorkerID: worker.ID,
+		RpcAddr:  worker.RPCAddr,
+		Port:     worker.Port,
 	}
 
 	ok := call("Coordinator.RegisterWorker", &args, &result)
 	if ok {
-		fmt.Printf("reply  %v\n", result)
+		fmt.Printf("{ WorkerRegistrationRequest } : reply  %v\n", result)
+		go WorkerFetchTasks(worker)
 	} else {
-		fmt.Printf("call failed!\n")
+		fmt.Printf("{ WorkerRegistrationRequest } : call failed!\n")
 	}
+}
+
+func WorkerFetchTasks(worker *Workers) {
+
+	var result WorkerTaskRequestReply
+	args := WorkerTaskRequestArgs{
+		WorkerID: worker.ID,
+		RpcAddr:  worker.RPCAddr,
+		Port:     worker.Port,
+	}
+
+	ok := call("Coordinator.TaskRequestByWorker", &args, &result)
+	if ok {
+		fmt.Printf("{ WorkerFetchTasks } : reply  %v\n", result)
+	} else {
+		fmt.Printf("{ WorkerFetchTasks } : call failed!\n")
+	}
+}
+
+func MakeWorker() {
+
+	worker := new(Workers)
+	err := rpc.Register(worker)
+	if err != nil {
+		log.Fatal("RPC register error:", err)
+	}
+
+	listener, err := net.Listen("tcp", ":0")
+	if err != nil {
+		log.Fatal("listen error:", err)
+	}
+
+	defer listener.Close()
+
+	addr := listener.Addr().(*net.TCPAddr)
+	fmt.Printf("Worker listening on %s:%d\n", addr.IP, addr.Port)
+
+	worker.ID = fmt.Sprintf("worker-%d", time.Now().UnixMicro())
+	worker.RPCAddr = addr.IP.String()
+	worker.Port = fmt.Sprintf("%d", addr.Port)
+
+	go WorkerRegistrationRequest(worker)
+
+	rpc.Accept(listener) //allow incoming requests
 }
