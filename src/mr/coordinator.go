@@ -9,53 +9,17 @@ import (
 import "net"
 import "net/rpc"
 
-type WorkerStatus string
-
-const (
-	StateIdle      WorkerStatus = "IDLE"
-	StateConnected WorkerStatus = "CONNECTED"
-	StatusError    WorkerStatus = "ERROR"
-	StateRetrying  WorkerStatus = "RETRYING"
-)
-
-type TaskStatus string
-
-const (
-	Waiting TaskStatus = "WAITING"
-	Pending TaskStatus = "PENDING"
-	DONE    TaskStatus = "DONE"
-)
-
-type Job struct {
-	taskId     string
-	filePath   string
-	status     TaskStatus
-	worker     WorkerType
-	assignedAt time.Time
-	nReduce    int
-}
-
-type WorkerType struct {
-	workerId        string
-	status          WorkerStatus
-	Address         string
-	Port            string
-	LastSeen        time.Time
-	HeartBeatChecks int
-}
-
 type Coordinator struct {
 	noOfReduceTasks int
 
 	mapTasks    []Job
 	reduceTasks []Job
 
-	completedMap    int
-	completedReduce int
+	phase      CoordinatorPhase
+	partitions Partition
 
-	mu         sync.Mutex
-	isTaskDone bool         //indicates if all tasks are done
-	workers    []WorkerType //to keep track of workers which are idle , active or crashed
+	mu      sync.Mutex
+	workers []WorkerType //to keep track of workers which are idle , active or crashed
 }
 
 func (c *Coordinator) RegisterWorker(args *WorkerRegistrationArgs, reply *WorkerRegistrationReply) error {
@@ -71,6 +35,107 @@ func (c *Coordinator) RegisterWorker(args *WorkerRegistrationArgs, reply *Worker
 	c.workers = append(c.workers, worker)
 
 	reply.RegistrationStatus = true
+	return nil
+}
+
+func (c *Coordinator) TaskTransitionManager(t TaskType) {
+
+	hasPendingTask := true
+	switch t {
+	case MapTask:
+		for _, task := range c.mapTasks {
+			if task.status == Pending {
+				hasPendingTask = false
+				break
+			}
+		}
+
+		if hasPendingTask {
+			c.phase = ReducePhase
+			return
+		}
+	case ReduceTask:
+		for _, task := range c.reduceTasks {
+			if task.status == Pending {
+				hasPendingTask = false
+				break
+			}
+		}
+
+		if hasPendingTask {
+			c.phase = FinishedPhase
+			return
+		}
+	}
+}
+
+func (c *Coordinator) TaskUpdateByWorker(args *WorkerTaskUpdateArgs, reply *WorkerTaskUpdateReply) error {
+
+	reply.Status = Invalid
+	if args.TaskId == "" {
+
+		reply.Message = "Task ID is required"
+		return nil
+	}
+
+	if args.WorkerID == "" {
+
+		reply.Message = "Worker ID is required"
+		return nil
+	}
+
+	if args.Type == "" {
+
+		reply.Message = "Provide task type ( MAP | REDUCE )"
+		return nil
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	var jobs []Job
+
+	switch args.Type {
+	case MapTask:
+		jobs = c.mapTasks
+	case ReduceTask:
+		jobs = c.reduceTasks
+	default:
+		reply.Message = "Task type must be either MAP or REDUCE"
+		return nil
+	}
+
+	for i := range jobs {
+		job := &jobs[i]
+		if job.taskId == args.TaskId {
+
+			if job.worker.workerId != args.WorkerID {
+				reply.Message = fmt.Sprintf("Task not assigned to worker %s", args.WorkerID)
+				reply.Status = Invalid
+				return nil
+			}
+
+			if job.status == DONE {
+				reply.Message = "Task already completed"
+				reply.Status = DONE
+				return nil
+			}
+
+			job.status = DONE
+
+			for _, kv := range args.IntermediatePartition {
+				fmt.Println("immediate  ... ", kv)
+			}
+
+			reply.Status = DONE
+			reply.Message = "Task update received successfully"
+
+			c.TaskTransitionManager(args.Type)
+			return nil
+		}
+	}
+
+	reply.Message = "Task not found"
 	return nil
 }
 
@@ -107,22 +172,27 @@ func (c *Coordinator) TaskRequestByWorker(args *WorkerTaskRequestArgs, reply *Wo
 		return nil
 	}
 
-	for i := range c.mapTasks {
+	if c.phase == MapPhase {
+		for i := range c.mapTasks {
 
-		task := &c.mapTasks[i]
+			task := &c.mapTasks[i]
 
-		if task.status == Waiting {
+			if task.status == Waiting {
 
-			task.status = Pending
-			task.worker = assignedWorker
+				task.status = Pending
+				task.worker = assignedWorker
 
-			reply.TaskAvailable = true
-			reply.TaskId = task.taskId
-			reply.FilePath = task.filePath
-			reply.Status = task.status
-			reply.nReduce = task.nReduce
-			return nil
+				reply.TaskAvailable = true
+				reply.TaskId = task.taskId
+				reply.FilePath = task.filePath
+				reply.Status = task.status
+				reply.NReduce = task.nReduce
+				reply.Type = MapTask
+				return nil
+			}
 		}
+	} else {
+
 	}
 
 	return nil
@@ -163,7 +233,8 @@ func (c *Coordinator) Healthcheck() {
 
 	for range ticker.C {
 
-		if c.Done() {
+		currentPhase := c.Done()
+		if currentPhase == FinishedPhase {
 			fmt.Println("All tasks are done")
 			return
 		}
@@ -180,9 +251,9 @@ func (c *Coordinator) Healthcheck() {
 	}
 }
 
-func (c *Coordinator) Done() bool {
+func (c *Coordinator) Done() CoordinatorPhase {
 
-	return c.isTaskDone
+	return c.phase
 }
 
 func (c *Coordinator) ActiveWorkers() int {
@@ -259,6 +330,8 @@ func (c *Coordinator) WorkerSync(rpcname string, workerId string, port string, w
 	- Prepare a worker registration ✅
 	- Prepare healthcheck / ping mechanism from coordinator to workers ✅
 	- Worker fetches task from Coordinator ✅
+	- Worker map and partition mapped values as per nReduce ✅
+	- Worker updates task status to coordinator
 
 */
 
@@ -266,6 +339,7 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 
 	c := Coordinator{}
 	c.noOfReduceTasks = nReduce
+	c.phase = MapPhase
 
 	for idx, file := range files {
 		task := Job{

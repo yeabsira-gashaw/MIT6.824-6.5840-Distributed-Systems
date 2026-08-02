@@ -34,10 +34,24 @@ type WorkerTaskRequestArgs struct {
 
 type WorkerTaskRequestReply struct {
 	TaskId        string
+	Type          TaskType
 	Status        TaskStatus
 	FilePath      string
 	TaskAvailable bool
-	nReduce       int
+	NReduce       int
+}
+
+type WorkerTaskUpdateArgs struct {
+	WorkerID              string
+	TaskId                string
+	Type                  TaskType
+	Status                TaskStatus
+	IntermediatePartition Partition
+}
+
+type WorkerTaskUpdateReply struct {
+	Status  TaskStatus
+	Message string
 }
 
 type ExampleArgs struct {

@@ -171,16 +171,29 @@ func WorkerFetchTasks(worker *Workers) {
 
 		intermediate = append(intermediate, kva...)
 
-		partitions := make(map[int][]KeyValue)
+		partitions := Partition{}
 
 		for _, kv := range intermediate {
-			partitionValue := ihash(kv.Key) % result.nReduce
+			partitionValue := ihash(kv.Key) % result.NReduce
 			partitions[partitionValue] = append(partitions[partitionValue], kv)
 		}
 
 		fmt.Printf("{ WorkerFetchTasks ---  } : intermediate %v\n", intermediate)
 
-		//next update the task status to coordinator ...
+		var resultTaskUpdate WorkerTaskUpdateReply
+		argsTaskUpdate := WorkerTaskUpdateArgs{
+			WorkerID:              worker.ID,
+			TaskId:                result.TaskId,
+			Type:                  result.Type,
+			Status:                DONE,
+			IntermediatePartition: partitions,
+		}
+
+		passed := call("Coordinator.TaskUpdateByWorker", &argsTaskUpdate, &resultTaskUpdate)
+		if passed {
+			fmt.Printf("{ WorkerTaskUpdate } : reply  %v\n", resultTaskUpdate)
+		}
+		//next update the task status to coordinator alongside the partition
 	} else {
 		fmt.Printf("{ WorkerFetchTasks } : call failed!\n")
 	}
