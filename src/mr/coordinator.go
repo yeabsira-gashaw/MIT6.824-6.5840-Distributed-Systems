@@ -44,7 +44,7 @@ func (c *Coordinator) TaskTransitionManager(t TaskType) {
 	switch t {
 	case MapTask:
 		for _, task := range c.mapTasks {
-			if task.status == Pending {
+			if task.status == Pending || task.status == Waiting {
 				hasPendingTask = false
 				break
 			}
@@ -123,12 +123,13 @@ func (c *Coordinator) TaskUpdateByWorker(args *WorkerTaskUpdateArgs, reply *Work
 
 			job.status = DONE
 
-			for _, kv := range args.IntermediatePartition {
-				fmt.Println("immediate  ... ", kv)
+			for key, kv := range args.IntermediatePartition {
+				c.partitions[key] = append(c.partitions[key], kv...)
 			}
 
 			reply.Status = DONE
 			reply.Message = "Task update received successfully"
+			reply.Phase = c.phase
 
 			c.TaskTransitionManager(args.Type)
 			return nil
@@ -151,6 +152,7 @@ func (c *Coordinator) TaskRequestByWorker(args *WorkerTaskRequestArgs, reply *Wo
 		- no other worker can enter this same section of code.
 
 	*/
+	fmt.Println(" -- phase ", c.phase)
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -169,6 +171,7 @@ func (c *Coordinator) TaskRequestByWorker(args *WorkerTaskRequestArgs, reply *Wo
 	reply.TaskAvailable = false
 
 	if !found {
+		fmt.Println("early return .. ")
 		return nil
 	}
 
@@ -188,13 +191,17 @@ func (c *Coordinator) TaskRequestByWorker(args *WorkerTaskRequestArgs, reply *Wo
 				reply.Status = task.status
 				reply.NReduce = task.nReduce
 				reply.Type = MapTask
-				return nil
+				reply.Phase = c.phase
+				break
 			}
 		}
 	} else {
 
+		reply.Phase = c.phase
+		reply.TaskAvailable = false
 	}
 
+	fmt.Println(" reply --- >> <<< ", reply, " -- ", c.phase)
 	return nil
 }
 
@@ -340,6 +347,7 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	c := Coordinator{}
 	c.noOfReduceTasks = nReduce
 	c.phase = MapPhase
+	c.partitions = make(map[int][]KeyValue)
 
 	for idx, file := range files {
 		task := Job{

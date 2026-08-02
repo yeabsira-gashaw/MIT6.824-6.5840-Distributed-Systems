@@ -39,6 +39,7 @@ type WorkerTaskRequestReply struct {
 	FilePath      string
 	TaskAvailable bool
 	NReduce       int
+	Phase         CoordinatorPhase
 }
 
 type WorkerTaskUpdateArgs struct {
@@ -52,6 +53,7 @@ type WorkerTaskUpdateArgs struct {
 type WorkerTaskUpdateReply struct {
 	Status  TaskStatus
 	Message string
+	Phase   CoordinatorPhase
 }
 
 type ExampleArgs struct {

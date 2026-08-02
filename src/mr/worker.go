@@ -143,8 +143,6 @@ func WorkerRegistrationRequest(worker *Workers) {
 
 func WorkerFetchTasks(worker *Workers) {
 
-	mapf, _ := loadPlugin(os.Args[1])
-
 	var result WorkerTaskRequestReply
 	args := WorkerTaskRequestArgs{
 		WorkerID: worker.ID,
@@ -152,50 +150,66 @@ func WorkerFetchTasks(worker *Workers) {
 		Port:     worker.Port,
 	}
 
-	intermediate := ByKey{}
-
 	ok := call("Coordinator.TaskRequestByWorker", &args, &result)
 	if ok {
-		fmt.Printf("{ WorkerFetchTasks } : reply  %v\n", result)
 
-		file, err := os.Open(result.FilePath)
-		if err != nil {
-			log.Fatalf("cannot open %v", result.FilePath)
-		}
-		content, err := ioutil.ReadAll(file)
-		if err != nil {
-			log.Fatalf("cannot read %v", result.FilePath)
-		}
-		file.Close()
-		kva := mapf(result.FilePath, string(content))
+		fmt.Println("PHASE ", result.Phase)
+		if result.Phase == MapPhase {
 
-		intermediate = append(intermediate, kva...)
+			//instruct map task
+			MapperTask(result, worker)
 
-		partitions := Partition{}
-
-		for _, kv := range intermediate {
-			partitionValue := ihash(kv.Key) % result.NReduce
-			partitions[partitionValue] = append(partitions[partitionValue], kv)
+		} else if result.Phase == ReducePhase {
+			fmt.Println("WORKER FETCHED REDUCE TASKS")
+		} else {
+			fmt.Println("WORKER FINALIZED ALL")
 		}
 
-		fmt.Printf("{ WorkerFetchTasks ---  } : intermediate %v\n", intermediate)
-
-		var resultTaskUpdate WorkerTaskUpdateReply
-		argsTaskUpdate := WorkerTaskUpdateArgs{
-			WorkerID:              worker.ID,
-			TaskId:                result.TaskId,
-			Type:                  result.Type,
-			Status:                DONE,
-			IntermediatePartition: partitions,
-		}
-
-		passed := call("Coordinator.TaskUpdateByWorker", &argsTaskUpdate, &resultTaskUpdate)
-		if passed {
-			fmt.Printf("{ WorkerTaskUpdate } : reply  %v\n", resultTaskUpdate)
-		}
-		//next update the task status to coordinator alongside the partition
 	} else {
 		fmt.Printf("{ WorkerFetchTasks } : call failed!\n")
+	}
+}
+
+func MapperTask(result WorkerTaskRequestReply, worker *Workers) {
+	mapf, _ := loadPlugin(os.Args[1])
+
+	intermediate := ByKey{}
+	
+	file, err := os.Open(result.FilePath)
+	if err != nil {
+		log.Fatalf("cannot open %v", result.FilePath)
+	}
+	content, err := ioutil.ReadAll(file)
+	if err != nil {
+		log.Fatalf("cannot read %v", result.FilePath)
+	}
+	file.Close()
+	kva := mapf(result.FilePath, string(content))
+
+	intermediate = append(intermediate, kva...)
+
+	partitions := Partition{}
+
+	for _, kv := range intermediate {
+		partitionValue := ihash(kv.Key) % result.NReduce
+		partitions[partitionValue] = append(partitions[partitionValue], kv)
+	}
+
+	var resultTaskUpdate WorkerTaskUpdateReply
+	argsTaskUpdate := WorkerTaskUpdateArgs{
+		WorkerID:              worker.ID,
+		TaskId:                result.TaskId,
+		Type:                  result.Type,
+		Status:                DONE,
+		IntermediatePartition: partitions,
+	}
+
+	passed := call("Coordinator.TaskUpdateByWorker", &argsTaskUpdate, &resultTaskUpdate)
+	if passed {
+		fmt.Printf("{ WorkerTaskUpdate } : reply  %v\n", resultTaskUpdate)
+		if resultTaskUpdate.Phase != FinishedPhase {
+			go WorkerFetchTasks(worker)
+		}
 	}
 }
 
