@@ -171,7 +171,16 @@ func WorkerFetchTasks(worker *Workers) {
 
 		intermediate = append(intermediate, kva...)
 
+		partitions := make(map[int][]KeyValue)
+
+		for _, kv := range intermediate {
+			partitionValue := ihash(kv.Key) % result.nReduce
+			partitions[partitionValue] = append(partitions[partitionValue], kv)
+		}
+
 		fmt.Printf("{ WorkerFetchTasks ---  } : intermediate %v\n", intermediate)
+
+		//next update the task status to coordinator ...
 	} else {
 		fmt.Printf("{ WorkerFetchTasks } : call failed!\n")
 	}

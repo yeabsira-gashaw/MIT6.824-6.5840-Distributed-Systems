@@ -32,6 +32,7 @@ type Job struct {
 	status     TaskStatus
 	worker     WorkerType
 	assignedAt time.Time
+	nReduce    int
 }
 
 type WorkerType struct {
@@ -119,6 +120,7 @@ func (c *Coordinator) TaskRequestByWorker(args *WorkerTaskRequestArgs, reply *Wo
 			reply.TaskId = task.taskId
 			reply.FilePath = task.filePath
 			reply.Status = task.status
+			reply.nReduce = task.nReduce
 			return nil
 		}
 	}
@@ -270,6 +272,7 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 			taskId:   fmt.Sprintf("task-%d", idx),
 			status:   Waiting,
 			filePath: file,
+			nReduce:  nReduce,
 		}
 
 		c.mapTasks = append(c.mapTasks, task)

@@ -37,6 +37,7 @@ type WorkerTaskRequestReply struct {
 	Status        TaskStatus
 	FilePath      string
 	TaskAvailable bool
+	nReduce       int
 }
 
 type ExampleArgs struct {
