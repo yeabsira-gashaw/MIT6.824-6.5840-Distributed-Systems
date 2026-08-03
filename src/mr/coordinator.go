@@ -66,14 +66,14 @@ func (c *Coordinator) TaskTransitionManager(t TaskType) {
 			return
 		}
 	case ReduceTask:
+		count := 0
 		for _, task := range c.reduceTasks {
-			if task.status == Pending {
-				hasPendingTask = true
-				break
+			if task.status == DONE {
+				count++
 			}
 		}
 
-		if !hasPendingTask {
+		if count == len(c.reduceTasks) {
 			c.phase = FinishedPhase
 			return
 		}

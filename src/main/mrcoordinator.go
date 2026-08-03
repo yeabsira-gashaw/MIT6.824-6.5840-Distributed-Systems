@@ -34,7 +34,7 @@ func main() {
 		log.Fatal("Error creating output directory")
 	}
 
-	m := mr.MakeCoordinator(os.Args[1:], 10)
+	m := mr.MakeCoordinator(os.Args[1:], 2)
 	currentPhase := m.Done()
 	for currentPhase != mr.FinishedPhase {
 		fmt.Printf("%d Workers running , Current Phase : %d \n", m.ActiveWorkers(), currentPhase)
