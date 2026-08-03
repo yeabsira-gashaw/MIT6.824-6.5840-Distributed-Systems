@@ -181,6 +181,10 @@ func MapperTask(result WorkerTaskRequestReply, worker *Workers) {
 		file.Close()
 	}
 
+	go DoWorkerTaskUpdate(result, worker)
+}
+
+func DoWorkerTaskUpdate(result WorkerTaskRequestReply, worker *Workers) {
 	var resultTaskUpdate WorkerTaskUpdateReply
 	argsTaskUpdate := WorkerTaskUpdateArgs{
 		WorkerID: worker.ID,
@@ -277,6 +281,8 @@ func ReducerTask(result WorkerTaskRequestReply, worker *Workers) {
 		i = j
 	}
 
+	fmt.Println("TASK ::: ", result.TaskId, " ** ", result.Type, " --- ", result.Phase)
+	go DoWorkerTaskUpdate(result, worker)
 }
 func Worker() {
 

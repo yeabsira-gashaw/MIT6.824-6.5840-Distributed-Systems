@@ -51,7 +51,6 @@ func (c *Coordinator) TaskTransitionManager(t TaskType) {
 
 		if !hasPendingTask {
 
-			fmt.Println(" c.noOfReduceTasks ", c.noOfReduceTasks)
 			for i := 0; i < c.noOfReduceTasks; i++ {
 				reduceTask := Job{
 					taskId:    fmt.Sprintf("task-%d", i),
@@ -59,7 +58,6 @@ func (c *Coordinator) TaskTransitionManager(t TaskType) {
 					partition: i,
 				}
 
-				fmt.Println("Reduce task :: ", reduceTask)
 				c.reduceTasks = append(c.reduceTasks, reduceTask)
 			}
 
@@ -70,12 +68,12 @@ func (c *Coordinator) TaskTransitionManager(t TaskType) {
 	case ReduceTask:
 		for _, task := range c.reduceTasks {
 			if task.status == Pending {
-				hasPendingTask = false
+				hasPendingTask = true
 				break
 			}
 		}
 
-		if hasPendingTask {
+		if !hasPendingTask {
 			c.phase = FinishedPhase
 			return
 		}
@@ -175,7 +173,6 @@ func (c *Coordinator) assignMapTask(assignedWorker *WorkerType, reply *WorkerTas
 
 func (c *Coordinator) assignReduceTask(assignedWorker *WorkerType, reply *WorkerTaskRequestReply) error {
 
-	fmt.Println(" -- tasks  ", c.reduceTasks)
 	for i := range c.reduceTasks {
 
 		task := &c.reduceTasks[i]
@@ -214,7 +211,6 @@ func (c *Coordinator) TaskRequestByWorker(args *WorkerTaskRequestArgs, reply *Wo
 		- no other worker can enter this same section of code.
 
 	*/
-	fmt.Println(" -- phase ", c.phase)
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -231,7 +227,7 @@ func (c *Coordinator) TaskRequestByWorker(args *WorkerTaskRequestArgs, reply *Wo
 	reply.TaskAvailable = false
 
 	if assignedWorker == nil {
-		fmt.Println("early return .. ")
+		fmt.Println("Couldn't find assigned worker ")
 		return nil
 	}
 
@@ -339,7 +335,6 @@ func (c *Coordinator) WorkerSync(rpcname string, workerId string, port string, w
 	err = client.Call(rpcname, args, &result)
 	c.mu.Lock()
 	if err != nil {
-		fmt.Println("Ping error ", err)
 		if c.workers[workerIdx].HeartBeatChecks == 3 {
 
 			c.workers[workerIdx].status = StatusError
