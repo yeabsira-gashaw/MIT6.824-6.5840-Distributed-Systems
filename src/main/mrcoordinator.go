@@ -10,6 +10,7 @@ package main
 //
 
 import (
+	"log"
 	"time"
 
 	"6.5840/mr"
@@ -21,6 +22,16 @@ func main() {
 	if len(os.Args) < 2 {
 		fmt.Printf("Usage: coordinator input-files... %v \n", os.Stderr)
 		os.Exit(1)
+	}
+
+	err := os.MkdirAll("mr-data/intermediate", 0755)
+	if err != nil {
+		log.Fatal("Error creating intermediate directory")
+	}
+
+	err = os.MkdirAll("mr-data/output", 0755)
+	if err != nil {
+		log.Fatal("Error creating output directory")
 	}
 
 	m := mr.MakeCoordinator(os.Args[1:], 10)

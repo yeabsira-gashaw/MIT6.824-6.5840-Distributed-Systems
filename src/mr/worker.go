@@ -1,6 +1,7 @@
 package mr
 
 import (
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"net"
@@ -66,47 +67,7 @@ func ihash(key string) int {
 	return int(h.Sum32() & 0x7fffffff)
 }
 
-// main/mrworker.go calls this function.
-func Worker(mapf func(string, string) []KeyValue,
-	reducef func(string, []string) string) {
-
-	// Your worker implementation here.
-
-	// uncomment to send the Example RPC to the coordinator.
-	// CallExample()
-
-}
-
-// example function to show how to make an RPC call to the coordinator.
-//
-// the RPC argument and reply types are defined in rpc.go.
-func CallExample() {
-
-	// declare an argument structure.
-	args := ExampleArgs{}
-
-	// fill in the argument(s).
-	args.X = 99
-
-	// declare a reply structure.
-	reply := ExampleReply{}
-
-	// send the RPC request, wait for the reply.
-	// the "Coordinator.Example" tells the
-	// receiving server that we'd like to call
-	// the Example() method of struct Coordinator.
-	ok := call("Coordinator.Example", &args, &reply)
-	if ok {
-		// reply.Y should be 100.
-		fmt.Printf("reply.Y %v\n", reply.Y)
-	} else {
-		fmt.Printf("call failed!\n")
-	}
-}
-
 // send an RPC request to the coordinator, wait for the response.
-// usually returns true.
-// returns false if something goes wrong.
 func call(rpcname string, args interface{}, reply interface{}) bool {
 	c, err := rpc.Dial("tcp", "localhost:3000")
 	if err != nil {
@@ -161,6 +122,8 @@ func WorkerFetchTasks(worker *Workers) {
 
 		} else if result.Phase == ReducePhase {
 			fmt.Println("WORKER FETCHED REDUCE TASKS")
+			fmt.Println(" Reduce task : ", result.Partitions)
+			ReducerTask(result, worker)
 		} else {
 			fmt.Println("WORKER FINALIZED ALL")
 		}
@@ -171,10 +134,11 @@ func WorkerFetchTasks(worker *Workers) {
 }
 
 func MapperTask(result WorkerTaskRequestReply, worker *Workers) {
+
 	mapf, _ := loadPlugin(os.Args[1])
 
 	intermediate := ByKey{}
-	
+
 	file, err := os.Open(result.FilePath)
 	if err != nil {
 		log.Fatalf("cannot open %v", result.FilePath)
@@ -195,13 +159,32 @@ func MapperTask(result WorkerTaskRequestReply, worker *Workers) {
 		partitions[partitionValue] = append(partitions[partitionValue], kv)
 	}
 
+	for partitionID := 0; partitionID < result.NReduce; partitionID++ {
+
+		filename := fmt.Sprintf("mr-data/intermediate/mr-%s-%d", result.TaskId, partitionID)
+		file, err := os.Create(filename)
+		if err != nil {
+			fmt.Println("cannot create file ", filename)
+			log.Fatal(err)
+		}
+
+		encoder := json.NewEncoder(file)
+		for _, kv := range partitions[partitionID] {
+			if err := encoder.Encode(&kv); err != nil {
+				fmt.Println("cannot encode ", kv)
+				log.Fatal(err)
+			}
+		}
+
+		file.Close()
+	}
+
 	var resultTaskUpdate WorkerTaskUpdateReply
 	argsTaskUpdate := WorkerTaskUpdateArgs{
-		WorkerID:              worker.ID,
-		TaskId:                result.TaskId,
-		Type:                  result.Type,
-		Status:                DONE,
-		IntermediatePartition: partitions,
+		WorkerID: worker.ID,
+		TaskId:   result.TaskId,
+		Type:     result.Type,
+		Status:   DONE,
 	}
 
 	passed := call("Coordinator.TaskUpdateByWorker", &argsTaskUpdate, &resultTaskUpdate)
@@ -213,7 +196,13 @@ func MapperTask(result WorkerTaskRequestReply, worker *Workers) {
 	}
 }
 
-func MakeWorker() {
+func ReducerTask(result WorkerTaskRequestReply, worker *Workers) {
+
+	//_, _ := loadPlugin(os.Args[1])
+
+	//files read (mr-partition_num-*) and reduce to be implemented
+}
+func Worker() {
 
 	worker := new(Workers)
 	err := rpc.Register(worker)

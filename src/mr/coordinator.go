@@ -15,8 +15,7 @@ type Coordinator struct {
 	mapTasks    []Job
 	reduceTasks []Job
 
-	phase      CoordinatorPhase
-	partitions Partition
+	phase CoordinatorPhase
 
 	mu      sync.Mutex
 	workers []WorkerType //to keep track of workers which are idle , active or crashed
@@ -40,17 +39,31 @@ func (c *Coordinator) RegisterWorker(args *WorkerRegistrationArgs, reply *Worker
 
 func (c *Coordinator) TaskTransitionManager(t TaskType) {
 
-	hasPendingTask := true
+	hasPendingTask := false
 	switch t {
 	case MapTask:
 		for _, task := range c.mapTasks {
 			if task.status == Pending || task.status == Waiting {
-				hasPendingTask = false
+				hasPendingTask = true
 				break
 			}
 		}
 
-		if hasPendingTask {
+		if !hasPendingTask {
+
+			fmt.Println(" c.noOfReduceTasks ", c.noOfReduceTasks)
+			for i := 0; i < c.noOfReduceTasks; i++ {
+				reduceTask := Job{
+					taskId:    fmt.Sprintf("task-%d", i),
+					status:    Waiting,
+					partition: i,
+				}
+
+				fmt.Println("Reduce task :: ", reduceTask)
+				c.reduceTasks = append(c.reduceTasks, reduceTask)
+			}
+
+			//Transition to Reduce phase
 			c.phase = ReducePhase
 			return
 		}
@@ -123,10 +136,6 @@ func (c *Coordinator) TaskUpdateByWorker(args *WorkerTaskUpdateArgs, reply *Work
 
 			job.status = DONE
 
-			for key, kv := range args.IntermediatePartition {
-				c.partitions[key] = append(c.partitions[key], kv...)
-			}
-
 			reply.Status = DONE
 			reply.Message = "Task update received successfully"
 			reply.Phase = c.phase
@@ -137,6 +146,59 @@ func (c *Coordinator) TaskUpdateByWorker(args *WorkerTaskUpdateArgs, reply *Work
 	}
 
 	reply.Message = "Task not found"
+	return nil
+}
+
+func (c *Coordinator) assignMapTask(assignedWorker *WorkerType, reply *WorkerTaskRequestReply) error {
+	for i := range c.mapTasks {
+
+		task := &c.mapTasks[i]
+
+		if task.status == Waiting {
+
+			task.status = Pending
+			task.worker = *assignedWorker
+
+			reply.TaskAvailable = true
+			reply.TaskId = task.taskId
+			reply.FilePath = task.filePath
+			reply.Status = task.status
+			reply.NReduce = task.nReduce
+			reply.Type = MapTask
+			reply.Phase = c.phase
+			break
+		}
+	}
+
+	return nil
+}
+
+func (c *Coordinator) assignReduceTask(assignedWorker *WorkerType, reply *WorkerTaskRequestReply) error {
+
+	fmt.Println(" -- tasks  ", c.reduceTasks)
+	for i := range c.reduceTasks {
+
+		task := &c.reduceTasks[i]
+
+		if task.status == Waiting {
+			task.status = Pending
+			task.worker = *assignedWorker
+
+			reply.TaskAvailable = true
+			reply.TaskId = task.taskId
+			reply.Status = task.status
+			reply.Type = ReduceTask
+			reply.Phase = c.phase
+			reply.Partitions = task.partition
+
+			return nil
+		}
+
+	}
+
+	reply.Phase = c.phase
+	reply.TaskAvailable = false
+
 	return nil
 }
 
@@ -156,52 +218,35 @@ func (c *Coordinator) TaskRequestByWorker(args *WorkerTaskRequestArgs, reply *Wo
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	var assignedWorker WorkerType
-	found := false
+	var assignedWorker *WorkerType
 
 	//check the worker if registered before
-	for _, worker := range c.workers {
-		if worker.workerId == args.WorkerID {
-			assignedWorker = worker
-			found = true
+	for i := range c.workers {
+		if c.workers[i].workerId == args.WorkerID {
+			assignedWorker = &c.workers[i]
 			break
 		}
 	}
 
 	reply.TaskAvailable = false
 
-	if !found {
+	if assignedWorker == nil {
 		fmt.Println("early return .. ")
 		return nil
 	}
 
-	if c.phase == MapPhase {
-		for i := range c.mapTasks {
+	switch c.phase {
+	case MapPhase:
+		return c.assignMapTask(assignedWorker, reply)
+	case ReducePhase:
+		return c.assignReduceTask(assignedWorker, reply)
+	case FinishedPhase:
 
-			task := &c.mapTasks[i]
-
-			if task.status == Waiting {
-
-				task.status = Pending
-				task.worker = assignedWorker
-
-				reply.TaskAvailable = true
-				reply.TaskId = task.taskId
-				reply.FilePath = task.filePath
-				reply.Status = task.status
-				reply.NReduce = task.nReduce
-				reply.Type = MapTask
-				reply.Phase = c.phase
-				break
-			}
-		}
-	} else {
-
-		reply.Phase = c.phase
 		reply.TaskAvailable = false
+		reply.Phase = c.phase
+		return nil
 	}
 
-	fmt.Println(" reply --- >> <<< ", reply, " -- ", c.phase)
 	return nil
 }
 
@@ -347,7 +392,6 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	c := Coordinator{}
 	c.noOfReduceTasks = nReduce
 	c.phase = MapPhase
-	c.partitions = make(map[int][]KeyValue)
 
 	for idx, file := range files {
 		task := Job{

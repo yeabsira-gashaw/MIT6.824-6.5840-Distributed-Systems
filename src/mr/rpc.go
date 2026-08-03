@@ -40,6 +40,7 @@ type WorkerTaskRequestReply struct {
 	TaskAvailable bool
 	NReduce       int
 	Phase         CoordinatorPhase
+	Partitions    int
 }
 
 type WorkerTaskUpdateArgs struct {

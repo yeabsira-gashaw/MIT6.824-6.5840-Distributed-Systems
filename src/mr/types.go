@@ -42,6 +42,7 @@ type Job struct {
 	worker     WorkerType
 	assignedAt time.Time
 	nReduce    int
+	partition  int
 }
 
 type WorkerType struct {
