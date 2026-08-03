@@ -189,7 +189,7 @@ func (c *Coordinator) assignReduceTask(assignedWorker *WorkerType, reply *Worker
 			reply.Status = task.status
 			reply.Type = ReduceTask
 			reply.Phase = c.phase
-			reply.Partitions = task.partition
+			reply.Partition = task.partition
 
 			return nil
 		}

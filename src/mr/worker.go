@@ -6,7 +6,9 @@ import (
 	"io/ioutil"
 	"net"
 	"os"
+	"path/filepath"
 	"plugin"
+	"sort"
 	"time"
 )
 import "log"
@@ -122,7 +124,7 @@ func WorkerFetchTasks(worker *Workers) {
 
 		} else if result.Phase == ReducePhase {
 			fmt.Println("WORKER FETCHED REDUCE TASKS")
-			fmt.Println(" Reduce task : ", result.Partitions)
+			fmt.Println(" Reduce task : ", result.Partition)
 			ReducerTask(result, worker)
 		} else {
 			fmt.Println("WORKER FINALIZED ALL")
@@ -198,9 +200,83 @@ func MapperTask(result WorkerTaskRequestReply, worker *Workers) {
 
 func ReducerTask(result WorkerTaskRequestReply, worker *Workers) {
 
-	//_, _ := loadPlugin(os.Args[1])
+	_, reducef := loadPlugin(os.Args[1])
 
 	//files read (mr-partition_num-*) and reduce to be implemented
+	files, err := filepath.Glob(
+		fmt.Sprintf("mr-data/intermediate/mr-task-*-%d", result.Partition),
+	)
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	var intermediate []KeyValue
+	for _, filename := range files {
+		fmt.Println("reading:", filename)
+		file, err := os.Open(filename)
+		if err != nil {
+			log.Fatalf("cannot open intermediate file %v", filename)
+		}
+
+		decoder := json.NewDecoder(file)
+		for {
+			var kv KeyValue
+			err := decoder.Decode(&kv)
+			if err != nil {
+				break
+			}
+
+			intermediate = append(intermediate, kv)
+		}
+		file.Close()
+	}
+
+	sort.Sort(ByKey(intermediate))
+
+	filename := fmt.Sprintf(
+		"mr-data/output/mr-out-%d",
+		result.Partition,
+	)
+
+	file, err := os.Create(filename)
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	defer file.Close()
+
+	i := 0
+	for i < len(intermediate) {
+
+		j := i + 1
+		values := []string{
+			intermediate[i].Value,
+		}
+
+		for j < len(intermediate) && intermediate[j].Key == intermediate[i].Key {
+			values = append(values, intermediate[j].Value)
+			j++
+		}
+
+		// reduce here
+
+		reduceResult := reducef(
+			intermediate[i].Key,
+			values,
+		)
+
+		fmt.Fprintf(
+			file,
+			"%v %v\n",
+			intermediate[i].Key,
+			reduceResult,
+		)
+
+		i = j
+	}
+
 }
 func Worker() {
 
