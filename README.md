@@ -149,6 +149,22 @@ The reducer:
 
 ---
 
+# Building MapReduce Plugins
+
+MapReduce applications are implemented as Go plugins inside the mrapps directory.
+
+For example, the Word Count application can be compiled as a plugin using:
+
+``` 
+go build -buildmode=plugin ../mrapps/wc.go
+```
+
+This generates the plugin:
+```
+wc.so
+```
+inside the main directory. Multiple MapReduce applications can be built in the same way by replacing wc.go with the corresponding application file.
+
 # Key Concepts Implemented
 
 - Distributed task scheduling
